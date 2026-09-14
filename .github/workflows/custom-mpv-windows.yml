@@ -35,8 +35,8 @@ jobs:
 
       # --- 1. CCACHE SETUP (Massive speedup for iterative C/C++ tweaks) ---
       - name: Install ccache
-        run: pacman -Sy --noconfirm ccache
-
+        run: pacman -Sy --noconfirm --disable-sandbox ccache
+      
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
