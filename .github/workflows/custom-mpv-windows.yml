@@ -12,6 +12,11 @@ on:
         required: false
         default: master
         type: string
+      use_cache:
+        description: 'Use cache (uncheck to force a clean build from scratch)'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   build:
@@ -33,38 +38,41 @@ jobs:
         with:
           ref: master
 
-      # --- 1. CCACHE SETUP (Massive speedup for iterative C/C++ tweaks) ---
       - name: Install ccache
+        # Added --disable-sandbox to fix Arch Linux pacman issues in Docker
         run: pacman -Sy --noconfirm --disable-sandbox ccache
-      
+
+      # --- CACHE RESTORES (Only run if use_cache is checked) ---
       - name: Restore ccache
         uses: actions/cache/restore@v4
+        if: ${{ inputs.use_cache }}
         with:
           path: ~/.cache/ccache
-          key: ccache-x86_64-v3-${{ github.run_id }}
+          key: ccache-x86_64-v5-${{ github.run_id }}
           restore-keys: |
-            ccache-x86_64-v3-
+            ccache-x86_64-v5-
 
-      # --- 2. SOURCE & TOOLCHAIN CACHES ---
       - name: Restore downloaded sources cache
         uses: actions/cache/restore@v4
+        if: ${{ inputs.use_cache }}
         with:
           path: src_packages
-          key: src-packages-${{ github.run_id }}
+          key: src-packages-v5-${{ github.run_id }}
           restore-keys: |
-            src-packages-
+            src-packages-v5-
 
       - name: Restore GCC toolchain cache
         uses: actions/cache/restore@v4
+        if: ${{ inputs.use_cache }}
         with:
           path: build_windows
-          key: gcc-toolchain-x86_64-v3-${{ github.run_id }}
+          key: gcc-toolchain-x86_64-v5-${{ github.run_id }}
           restore-keys: |
-            gcc-toolchain-x86_64-v3-
+            gcc-toolchain-x86_64-v5-
 
+      # --- BUILD EXECUTION ---
       - name: Configure Windows build (x86_64-v3)
         run: |
-          # Added -DENABLE_CCACHE=ON
           cmake \
             -DTARGET_ARCH=x86_64-w64-mingw32 \
             -DGCC_ARCH=x86-64-v3 \
@@ -82,12 +90,11 @@ jobs:
       - name: Build GCC toolchain
         run: ninja -C build_windows gcc
 
-      # --- 3. INCREMENTAL BUILD EXECUTION ---
-      # This explicitly tells the build system to pull your latest git commit
-      - name: Update mpv source
-        run: ninja -C build_windows mpv-update || true
+      - name: Force mpv git update
+        # By removing this stamp file, we force the build system to pull 
+        # your latest mpv commit without losing the compiled object files!
+        run: rm -f build_windows/packages/mpv-prefix/src/mpv-stamp/mpv-update || true
 
-      # This will now ONLY compile the files you changed since the last run!
       - name: Build mpv
         run: ninja -C build_windows mpv
 
@@ -102,40 +109,32 @@ jobs:
           fi
           
           cp "$binary" artifact/mpv.exe
-          # Only copying mpv.exe to save upload time, add mkv.exe back if needed
-
-      - name: Upload Error Logs
-        if: failure() # This ensures it only runs if the build breaks
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-error-logs
-          path: build_windows/packages/ngtcp2-prefix/src/ngtcp2-stamp/*.log
 
       - name: Upload Windows executables
         uses: actions/upload-artifact@v4
         with:
           name: custom-mpv-windows-x86_64-v3
           path: artifact/
-          compression-level: 1 # Fastest compression so the workflow ends sooner
+          compression-level: 1
 
-      # --- 4. ROLLING CACHE SAVES ---
+      # --- CACHE SAVES (Only save if use_cache is checked) ---
       - name: Save ccache
         uses: actions/cache/save@v4
-        if: always()
+        if: ${{ always() && inputs.use_cache }}
         with:
           path: ~/.cache/ccache
-          key: ccache-x86_64-v3-${{ github.run_id }}
+          key: ccache-x86_64-v5-${{ github.run_id }}
 
       - name: Save downloaded sources cache
         uses: actions/cache/save@v4
-        if: always()
+        if: ${{ always() && inputs.use_cache }}
         with:
           path: src_packages
-          key: src-packages-${{ github.run_id }}
+          key: src-packages-v5-${{ github.run_id }}
 
       - name: Save GCC toolchain cache
         uses: actions/cache/save@v4
-        if: always()
+        if: ${{ always() && inputs.use_cache }}
         with:
           path: build_windows
-          key: gcc-toolchain-x86_64-v3-${{ github.run_id }}
+          key: gcc-toolchain-x86_64-v5-${{ github.run_id }}
