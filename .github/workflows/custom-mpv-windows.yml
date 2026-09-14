@@ -15,42 +15,101 @@ on:
 
 jobs:
   build:
-    name: Build Windows executable
+    name: Build Windows executable (x86_64-v3)
     runs-on: ubuntu-latest
     container:
       image: docker://ghcr.io/shinchiro/archlinux:latest
 
     steps:
+      - name: Setup git config
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git config --global pull.rebase true
+          git config --global --add safe.directory "$PWD"
+
       - name: Check out build system
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           ref: master
 
-      - name: Configure Windows build
+      - name: Restore downloaded sources cache
+        uses: actions/cache/restore@v4
+        with:
+          path: src_packages
+          key: src-packages-${{ github.run_id }}
+          restore-keys: |
+            src-packages-
+
+      - name: Restore GCC toolchain cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build_windows
+          key: gcc-toolchain-x86_64-v3-${{ github.run_id }}
+          restore-keys: |
+            gcc-toolchain-x86_64-v3-
+
+      - name: Configure Windows build (x86_64-v3)
         run: |
+          # Added -DSINGLE_SOURCE_LOCATION to centralize source downloads for caching
           cmake \
             -DTARGET_ARCH=x86_64-w64-mingw32 \
+            -DGCC_ARCH=x86-64-v3 \
             -DMPV_REPOSITORY=https://github.com/kanav67/mpv.git \
             -DMPV_GIT_TAG=${{ inputs.mpv_ref }} \
+            -DSINGLE_SOURCE_LOCATION="$PWD/src_packages" \
             -G Ninja \
             -B build_windows \
             -S "$PWD"
 
+      - name: Download source packages
+        run: ninja -C build_windows download || true
+
+      - name: Build GCC toolchain
+        # On subsequent runs, this step will take seconds because of the cache
+        run: ninja -C build_windows gcc
+
       - name: Build mpv
-        run: |
-          ninja -C build_windows gcc
-          ninja -C build_windows mpv
+        run: ninja -C build_windows mpv
 
       - name: Collect executables
         run: |
           mkdir -p artifact
           binary=$(find build_windows -type f -name mpv.exe -print -quit)
-          test -n "$binary"
+          
+          if [ -z "$binary" ]; then
+            echo "Error: mpv.exe was not found."
+            exit 1
+          fi
+          
           cp "$binary" artifact/mpv.exe
           cp "$binary" artifact/mkv.exe
 
       - name: Upload Windows executables
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         with:
-          name: custom-mpv-windows-x86_64
+          name: custom-mpv-windows-x86_64-v3
           path: artifact/
+
+      - name: Clean mpv build files before saving cache
+        if: always()
+        run: |
+          # We delete the mpv-specific build files so that the cache primarily
+          # holds the GCC toolchain. This guarantees mpv is cleanly rebuilt from 
+          # the commit/branch you specify in the workflow inputs next time.
+          rm -rf build_windows/mpv*
+          rm -rf build_windows/packages/mpv*
+
+      - name: Save downloaded sources cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: src_packages
+          key: src-packages-${{ github.run_id }}
+
+      - name: Save GCC toolchain cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: build_windows
+          key: gcc-toolchain-x86_64-v3-${{ github.run_id }}
