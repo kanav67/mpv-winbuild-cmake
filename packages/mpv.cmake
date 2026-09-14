@@ -1,3 +1,8 @@
+set(mpv_git_tag)
+if(NOT MPV_GIT_TAG STREQUAL "")
+    set(mpv_git_tag GIT_TAG ${MPV_GIT_TAG})
+endif()
+
 ExternalProject_Add(mpv
     DEPENDS
         angle-headers
@@ -25,7 +30,8 @@ ExternalProject_Add(mpv
         subrandr
         libsixel
         curl
-    GIT_REPOSITORY https://github.com/mpv-player/mpv.git
+    GIT_REPOSITORY ${MPV_REPOSITORY}
+    ${mpv_git_tag}
     SOURCE_DIR ${SOURCE_LOCATION}
     GIT_CLONE_FLAGS "--filter=tree:0"
     UPDATE_COMMAND ""

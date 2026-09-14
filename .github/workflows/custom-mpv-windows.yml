@@ -1,0 +1,56 @@
+name: Build custom mpv for Windows
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  workflow_dispatch:
+    inputs:
+      mpv_ref:
+        description: 'Branch, tag, or commit in the custom mpv repository'
+        required: false
+        default: master
+        type: string
+
+jobs:
+  build:
+    name: Build Windows executable
+    runs-on: ubuntu-latest
+    container:
+      image: docker://ghcr.io/shinchiro/archlinux:latest
+
+    steps:
+      - name: Check out build system
+        uses: actions/checkout@main
+        with:
+          ref: master
+
+      - name: Configure Windows build
+        run: |
+          cmake \
+            -DTARGET_ARCH=x86_64-w64-mingw32 \
+            -DMPV_REPOSITORY=https://github.com/kanav67/mpv.git \
+            -DMPV_GIT_TAG=${{ inputs.mpv_ref }} \
+            -G Ninja \
+            -B build_windows \
+            -S "$PWD"
+
+      - name: Build mpv
+        run: |
+          ninja -C build_windows gcc
+          ninja -C build_windows mpv
+
+      - name: Collect executables
+        run: |
+          mkdir -p artifact
+          binary=$(find build_windows -type f -name mpv.exe -print -quit)
+          test -n "$binary"
+          cp "$binary" artifact/mpv.exe
+          cp "$binary" artifact/mkv.exe
+
+      - name: Upload Windows executables
+        uses: actions/upload-artifact@main
+        with:
+          name: custom-mpv-windows-x86_64
+          path: artifact/
